@@ -1,0 +1,49 @@
+version: "3.9"
+services:
+  db:
+    container_name: db
+    image: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_PASSWORD=mysecretpassword
+      - POSTGRES_USER=omegle_admin
+      - POSTGRES_DB=omegle_db
+    volumes:
+      - ./db-data/:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  backend:
+    container_name: backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - DATABASE_HOST=db
+    volumes:
+      - ./backend:/app/
+      - /app/node_modules
+    depends_on:
+      - db
+
+  frontend:
+    container_name: frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - API_BASE_URL=backend
+    volumes:
+      - ./frontend:/app/
+      - /app/node_modules
+    depends_on:
+      - backend
+
+networks:
+  omegle-network:
+    driver: bridge
