@@ -23,6 +23,7 @@ services:
     environment:
       - PORT=3001
       - DATABASE_HOST=db
+      - SOCKET_CONN_ORIGIN_HOST=http://localhost:3000
     volumes:
       - ./backend/src:/app/src
     depends_on:
