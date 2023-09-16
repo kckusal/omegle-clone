@@ -2,7 +2,7 @@ version: "3.9"
 services:
   db:
     container_name: db
-    image: postgres
+    image: postgres:16.0
     ports:
       - "5432:5432"
     environment:
@@ -24,8 +24,7 @@ services:
       - PORT=3001
       - DATABASE_HOST=db
     volumes:
-      - ./backend:/app/
-      - /app/node_modules
+      - ./backend/src:/app/src
     depends_on:
       - db
 
@@ -39,8 +38,7 @@ services:
     environment:
       - API_BASE_URL=backend
     volumes:
-      - ./frontend:/app/
-      - /app/node_modules
+      - ./frontend/src:/app/src
     depends_on:
       - backend
 

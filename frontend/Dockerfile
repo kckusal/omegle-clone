@@ -6,9 +6,10 @@ ENV NODE_ENV development
 WORKDIR /app
 
 # Install app dependencies
-COPY  ["yarn.lock", "package.json"]
+# COPY  ["yarn.lock", "package.json"]
 
 # Copy source files
+# !Maybe Unnecessary in case volume mount in docker-compose will provide all this.
 COPY . .
 
 # Install app dependencies
@@ -16,4 +17,4 @@ RUN yarn install --frozen-lockfile
 
 EXPOSE 3000
 
-CMD ["yarn", "dev", "--host"]
+CMD ["yarn", "dev:docker"]

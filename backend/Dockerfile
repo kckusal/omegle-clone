@@ -6,7 +6,7 @@ ENV NODE_ENV development
 WORKDIR /app
 
 # Install app dependencies
-COPY  ["yarn.lock", "package.json"]
+# COPY  ["yarn.lock", "package.json"]
 
 # Copy source files
 COPY . .
