@@ -1,6 +1,6 @@
 export const Header = () => {
   return (
-    <div className="flex justify-between items-center drop-shadow-md">
+    <div className="flex justify-between items-center px-8 bg-green-50">
       <h1 className=" text-3xl py-4">
         <span className=" text-orange-500 font-bold">omegle</span> clone
       </h1>

@@ -4,10 +4,10 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   return (
-    <div className="flex flex-col items-stretch container">
+    <div className="flex flex-col items-stretch h-full">
       <Header />
 
-      <div className="py-8">{children}</div>
+      <div className=" h-full ">{children}</div>
     </div>
   );
 };
