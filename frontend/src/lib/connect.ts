@@ -18,6 +18,8 @@ let receiveChannel: RTCDataChannel;
 let iceCandidateSent = false;
 let timerToSendOffer: number;
 
+let newTextHandler: (text: string) => void;
+
 interface Offer {
   source_user: string | undefined;
   target_user: string | undefined;
@@ -109,7 +111,8 @@ const onReceiveChannelStateChange = () => {
 };
 
 const onReceiveChannelMessageCallback = (ev: MessageEvent) => {
-  console.log("Received msg: ", ev.data);
+  console.log("Received msg: ", ev);
+  newTextHandler?.(ev.data);
   // const receivedMsg = ev.data;
 };
 
@@ -122,6 +125,7 @@ const receiveChannelCallback = (ev: RTCDataChannelEvent) => {
 };
 
 export const sendData = (msg: string) => {
+  console.log({ msg });
   if (sendChannel) {
     onSendChannelStateChange(sendChannel);
     sendChannel.send(msg);
@@ -173,8 +177,14 @@ const receiveAnswer = async (data: Answer) => {
   }
 };
 
-export const initSocket = () => {
+export const initSocket = ({
+  onNewText,
+}: {
+  onNewText: (text: string) => void;
+}) => {
   if (socket) return;
+
+  newTextHandler = onNewText;
 
   socket = sio.connect("http://localhost:3001");
 
@@ -243,4 +253,9 @@ export const cleanup = () => {
   socket?.disconnect();
   peerConnection?.close();
   if (timerToSendOffer) clearTimeout(timerToSendOffer);
+};
+
+export const sendMessageToPeer = (text: string) => {
+  if (!text) return;
+  sendData(text);
 };

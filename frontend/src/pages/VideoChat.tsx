@@ -5,6 +5,7 @@ import {
   initUsers,
   initSocket,
   cleanup,
+  sendMessageToPeer,
 } from "@/lib/connect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -33,29 +34,31 @@ export const VideoChat = () => {
     );
   }, []);
 
+  const addMessage = useCallback((remoteMsg: string | undefined) => {
+    const text = remoteMsg || msgTextAreaRef.current?.value;
+
+    if (text) {
+      setMessages((data) => [...data, { text, local: !remoteMsg }]);
+      if (msgTextAreaRef?.current && !remoteMsg) {
+        msgTextAreaRef.current.value = "";
+      }
+    }
+  }, []);
+
   useEffect(() => {
     initUsers(localuser, remoteuser);
     let socket: Socket | undefined;
     if (localuser && mediaInitialized) {
-      socket = initSocket();
+      socket = initSocket({
+        onNewText: (text) => addMessage(text),
+      });
     }
 
     return () => {
       socket?.disconnect();
       cleanup();
     };
-  }, [localuser, mediaInitialized, remoteuser]);
-
-  const addMessage = useCallback((local = true) => {
-    if (!msgTextAreaRef.current) return;
-
-    const text = msgTextAreaRef.current?.value;
-
-    if (text) {
-      setMessages((data) => [...data, { text, local }]);
-      msgTextAreaRef.current.value = "";
-    }
-  }, []);
+  }, [addMessage, localuser, mediaInitialized, remoteuser]);
 
   return (
     <div className="flex items-stretch h-full">
@@ -86,13 +89,13 @@ export const VideoChat = () => {
           You are now chatting with a random stranger!
         </p>
 
-        <div className=" min-h-[200px] border-t-2 flex-1 px-4 py-2 flex flex-col gap-y-4">
+        <div className=" min-h-[200px] border-t-2 flex-1 px-4 py-2 flex flex-col gap-y-3">
           {messages.map((msg, i) => {
             return (
               <div
                 key={i}
                 className={[
-                  "rounded-sm bg-slate-300 py-2 px-3 w-[70%]",
+                  "rounded-sm py-2 px-3 w-[70%]",
                   msg.local
                     ? "bg-orange-800 text-white"
                     : "bg-gray-200 self-end",
@@ -113,7 +116,10 @@ export const VideoChat = () => {
 
           <Button
             className=" rounded-none h-full"
-            onClick={() => addMessage(true)}
+            onClick={() => {
+              sendMessageToPeer(msgTextAreaRef?.current?.value || "");
+              addMessage(undefined);
+            }}
           >
             Send
           </Button>
