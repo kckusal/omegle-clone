@@ -10,10 +10,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum ConnectionStatus {
+  available
+  handshaking
+  engaged
+}
+
 model Connection {
-  id        Int    @id @default(autoincrement())
+  id        Int              @id @default(autoincrement())
   socket_id String
   user_name String
+  status    ConnectionStatus @default(available)
 
   initiatedSessions Session[] @relation("InitiatedSessions")
   joinedSessions    Session[] @relation("JoinedSessions")
@@ -23,7 +30,7 @@ model Session {
   id           Int     @id @default(autoincrement())
   initiator_id Int
   joiner_id    Int
-  is_active    Boolean
+  is_active    Boolean @default(false)
 
   initiator Connection @relation("InitiatedSessions", fields: [initiator_id], references: [id])
   joiner    Connection @relation("JoinedSessions", fields: [joiner_id], references: [id])
