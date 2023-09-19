@@ -24,6 +24,7 @@ services:
       - PORT=3001
       - DATABASE_HOST=db
       - SOCKET_CONN_ORIGIN_HOST=http://localhost:3000
+      - DATABASE_URL=postgresql://username:password@host:port/dbname?schema=public
     volumes:
       - ./backend/src:/app/src
     depends_on:

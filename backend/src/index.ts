@@ -40,12 +40,6 @@ const server = app.listen(PORT, () =>
   console.log(`REST API server ready at: http://localhost:${PORT}`)
 );
 
-let userConnections: Array<{
-  username?: string;
-  connectionId: string;
-  offerSent?: boolean;
-}> = [];
-
 const io = new sio.Server<
   ClientToServerEvents,
   ServerToClientEvents,
@@ -54,35 +48,24 @@ const io = new sio.Server<
 >(server, {
   allowEIO3: true,
   cors: {
-    origin: process.env.SOCKET_CONN_ORIGIN_HOST || "",
+    origin: process.env.SOCKET_CONN_ORIGIN_HOST || undefined,
   },
 });
 
-const onSocketDisconnect = (connectionId: string) => {
-  userConnections = userConnections.filter(
-    (uc) => uc.connectionId !== connectionId
-  );
-  console.log("Received: disconnect ", connectionId);
-  console.log("USER CONNECTIONS: ", userConnections);
-};
-
 io.on("connection", async (socket) => {
-  console.log("Received: Connection ", socket.id);
+  console.log("Got: connection ", socket.id, socket.handshake.query);
+  socket.data.user_name = socket.handshake.query.user_name as string;
 
-  socket.on("join", async (data) => {
-    console.log("Received: join ", data);
-
-    await prisma.connection.create({
-      data: {
-        user_name: data.user_name,
-        socket_id: socket.id,
-        status: "available",
-      },
-    });
+  await prisma.connection.create({
+    data: {
+      user_name: socket.handshake.query.user_name as string,
+      socket_id: socket.id,
+      status: "available",
+    },
   });
 
   socket.on("offerToServer", async (data) => {
-    console.log("Received: offerToServer ", data);
+    console.log("Got: offerToServer ", socket.data);
 
     const target_connection = await prisma.connection.findFirst({
       where: {
@@ -94,7 +77,7 @@ io.on("connection", async (socket) => {
     });
 
     if (target_connection) {
-      console.log("Emitting: ReceiveOffer");
+      console.log("Emit: offerToClient ", target_connection);
 
       await prisma.connection.updateMany({
         data: {
@@ -115,7 +98,7 @@ io.on("connection", async (socket) => {
   });
 
   socket.on("answerToServer", async (data) => {
-    console.log("Received: answerToServer");
+    console.log("Got: answerToServer ", data.to_socket_id, socket.data);
 
     await prisma.connection.updateMany({
       data: {
@@ -129,7 +112,14 @@ io.on("connection", async (socket) => {
     });
 
     if (data.answer) {
-      console.log("Emitting: ReceiveAnswer");
+      console.log("Emit: answerToClient");
+      await prisma.session.create({
+        data: {
+          connection1_socket_id: socket.id,
+          connection2_socket_id: data.to_socket_id,
+        },
+      });
+
       socket.to(data.to_socket_id).emit("answerToClient", {
         answer: data.answer,
         from_socket_id: socket.id,
@@ -138,8 +128,10 @@ io.on("connection", async (socket) => {
   });
 
   socket.on("iceCandidateToServer", (data) => {
-    if (data) {
-      console.log("Emitting: candidateReceiver", socket.id);
+    console.log("Got: iceCandidateToServer", socket.data);
+
+    if (data.to_socket_id && data.ice_candidate) {
+      console.log("Emit: iceCandidateToClient ", data.to_socket_id);
       socket.to(data.to_socket_id).emit("iceCandidateToClient", {
         ice_candidate: data.ice_candidate,
         from_socket_id: socket.id,
@@ -147,7 +139,36 @@ io.on("connection", async (socket) => {
     }
   });
 
-  socket.on("disconnect", () => {
-    onSocketDisconnect(socket.id);
+  socket.on("disconnect", async () => {
+    await prisma.connection.delete({
+      where: {
+        socket_id: socket.id,
+      },
+    });
+
+    const session = await prisma.session.findFirst({
+      where: {
+        OR: [
+          { connection1_socket_id: socket.id },
+          { connection2_socket_id: socket.id },
+        ],
+      },
+    });
+
+    if (session) {
+      await prisma.session.delete({ where: { id: session.id } });
+
+      const partnerConnectionSocketId =
+        session.connection1_socket_id === socket.id
+          ? session.connection2_socket_id
+          : session.connection1_socket_id;
+
+      await prisma.connection.update({
+        data: { status: "available" },
+        where: {
+          socket_id: partnerConnectionSocketId,
+        },
+      });
+    }
   });
 });

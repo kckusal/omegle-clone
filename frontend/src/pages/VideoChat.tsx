@@ -2,14 +2,11 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   initMediaElements,
-  initUsers,
   initSocket,
   cleanup,
   sendMessageToPeer,
 } from "@/lib/connect";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Socket } from "socket.io-client";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export const VideoChat = () => {
   const localUserVideo = useRef<HTMLVideoElement | null>(null);
@@ -20,11 +17,6 @@ export const VideoChat = () => {
     Array<{ text: string; local: boolean }>
   >([]);
 
-  const [searchParams] = useSearchParams();
-  const { localuser, remoteuser } = useMemo(
-    () => Object.fromEntries(searchParams),
-    [searchParams]
-  );
   const [mediaInitialized, setMediaInitialized] = useState(false);
 
   useEffect(() => {
@@ -46,30 +38,27 @@ export const VideoChat = () => {
   }, []);
 
   useEffect(() => {
-    initUsers(localuser, remoteuser);
-    let socket: Socket | undefined;
-    if (localuser && mediaInitialized) {
-      socket = initSocket({
+    if (mediaInitialized) {
+      initSocket({
         onNewText: (text) => addMessage(text),
       });
     }
 
     return () => {
-      socket?.disconnect();
       cleanup();
     };
-  }, [addMessage, localuser, mediaInitialized, remoteuser]);
+  }, [addMessage, mediaInitialized]);
 
   return (
     <div className="flex items-stretch h-full">
-      <div className=" w-[50%] flex flex-col gap-y-1">
+      <div className=" w-[50%] flex flex-col gap-y-1 h-full">
         <div className=" bg-slate-800 w-full h-[50%] border-2 flex items-center">
           <video
             ref={localUserVideo}
             width="100%"
-            height="100%"
             playsInline
             autoPlay
+            className=" h-full"
           />
         </div>
 
@@ -77,9 +66,9 @@ export const VideoChat = () => {
           <video
             ref={remoteUserVideo}
             width="100%"
-            height="100%"
             playsInline
             autoPlay
+            className="h-full"
           />
         </div>
       </div>

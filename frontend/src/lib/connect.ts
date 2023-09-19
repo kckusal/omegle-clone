@@ -1,15 +1,15 @@
-import * as sio from "socket.io-client";
+import { Socket, connect } from "socket.io-client";
+
+import { ClientToServerEvents, ServerToClientEvents } from "../../shared-types";
 
 let localMediaEl: HTMLVideoElement;
 let localStream: MediaStream;
 
-let localUser: string | undefined;
-let remoteUser: string | undefined;
-
 let remoteMediaEl: HTMLVideoElement;
 let remoteStream: MediaStream;
 
-let socket: sio.Socket;
+let socket: Socket<ServerToClientEvents, ClientToServerEvents>;
+let peerSocketId: string;
 let peerConnection: RTCPeerConnection;
 
 let sendChannel: RTCDataChannel;
@@ -20,32 +20,6 @@ let timerToSendOffer: number;
 
 let newTextHandler: (text: string) => void;
 
-interface Offer {
-  source_user: string | undefined;
-  target_user: string | undefined;
-  offer: RTCSessionDescription | null;
-}
-
-interface Answer {
-  source_user: string | undefined;
-  target_user: string | undefined;
-  answer: RTCSessionDescriptionInit;
-}
-
-interface IceCandidateEvData {
-  source_user: string | undefined;
-  target_user: string | undefined;
-  ice_candidate: RTCIceCandidate;
-}
-
-export const initUsers = (
-  localUsername: string | undefined,
-  remoteUsername: string | undefined
-) => {
-  localUser = localUsername;
-  remoteUser = remoteUsername;
-};
-
 const servers: RTCConfiguration = {
   iceServers: [
     {
@@ -54,52 +28,53 @@ const servers: RTCConfiguration = {
   ],
 };
 
-const createPeerConnection = async () => {
+const getPeerConnection = async () => {
+  if (peerConnection) return peerConnection;
   console.log("Creating peer connection...");
-  const peerConnection = new RTCPeerConnection(servers);
+  const peerConn = new RTCPeerConnection(servers);
 
   remoteStream = new MediaStream();
   remoteMediaEl.srcObject = remoteStream;
 
   localStream.getTracks().forEach((track) => {
-    peerConnection.addTrack(track);
+    peerConn.addTrack(track);
   });
 
-  peerConnection.ontrack = async (event) => {
+  peerConn.ontrack = async (event) => {
     remoteStream.addTrack(event.track);
   };
 
   remoteStream.onremovetrack = () => {
-    peerConnection.close();
+    peerConn.close();
   };
 
-  peerConnection.onicecandidate = async (event) => {
+  peerConn.onicecandidate = async (event) => {
     // TODO: Many icecandidates are generated; depending on requirements, it is often okay to send only a few to the remote server
     if (
       event.candidate &&
       event.candidate.type === "host" &&
-      !iceCandidateSent
+      !iceCandidateSent &&
+      peerSocketId
     ) {
-      console.log("Emitting: candidateSentToUser", event.candidate);
-      socket.emit("candidateSentToUser", {
-        source_user: localUser,
-        target_user: remoteUser,
+      console.log("Emit: iceCandidateToServer", event.candidate, peerSocketId);
+      socket.emit("iceCandidateToServer", {
         ice_candidate: event.candidate,
-      } satisfies IceCandidateEvData);
+        to_socket_id: peerSocketId,
+      });
       iceCandidateSent = true;
     }
   };
 
-  sendChannel = peerConnection.createDataChannel("sendDataChannel");
+  sendChannel = peerConn.createDataChannel("sendDataChannel");
   sendChannel.onopen = () => {
     console.log("Data channel is now open and ready to use...");
     onSendChannelStateChange(sendChannel);
   };
 
-  peerConnection.ondatachannel = receiveChannelCallback;
+  peerConn.ondatachannel = receiveChannelCallback;
   // sendChannel.onmessage = onSendChannelMessageCallback;
 
-  return peerConnection;
+  return peerConn;
 };
 
 const onSendChannelStateChange = (channel: RTCDataChannel) => {
@@ -134,94 +109,81 @@ export const sendData = (msg: string) => {
   }
 };
 
-// TODO: Maybe wait for a while to see if it will receive offer before sending one?
-export const createAndSendOffer = async () => {
-  peerConnection = peerConnection || (await createPeerConnection());
-  const offer = await peerConnection.createOffer();
-
-  await peerConnection.setLocalDescription(offer);
-
-  console.log("Emitting: offerSentToRemote");
-  socket.emit("offerSentToRemote", {
-    source_user: localUser,
-    target_user: remoteUser,
-    offer: peerConnection.localDescription,
-  } satisfies Offer);
-};
-
-const sendAnswerToOffer = async (data: Offer) => {
-  peerConnection = peerConnection || (await createPeerConnection());
-
-  if (!data.offer) {
-    console.log("No offer on createAnswer");
-    return;
-  }
-
-  await peerConnection.setRemoteDescription(data.offer);
-  const answer = await peerConnection.createAnswer();
-  await peerConnection.setLocalDescription(answer);
-
-  console.log("Emitting: answerSent");
-  socket.emit("answerSent", {
-    answer,
-    source_user: data.target_user,
-    target_user: data.source_user,
-  } satisfies Answer);
-};
-
-const receiveAnswer = async (data: Answer) => {
-  if (!peerConnection.currentRemoteDescription) {
-    await peerConnection.setRemoteDescription(data.answer).then(() => {
-      console.log(peerConnection);
-    });
-  }
-};
-
 export const initSocket = ({
   onNewText,
 }: {
   onNewText: (text: string) => void;
 }) => {
   if (socket) return;
-
   newTextHandler = onNewText;
 
-  socket = sio.connect("http://localhost:3001");
+  console.log("Initializing Socket...");
+
+  socket = connect("http://localhost:3001?user_name=Kusal");
 
   let receivedOffer = false;
 
-  socket.on("connect", () => {
-    console.log("Received: connect");
+  socket.on("connect", async () => {
+    console.log("Got: connect");
 
-    if (socket.connected && localUser) {
-      console.log("Emitting: userconnect");
-      socket.emit("userconnect", {
-        username: localUser,
-      });
+    if (socket.connected) {
+      peerConnection = await getPeerConnection();
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
 
       timerToSendOffer = window.setTimeout(() => {
         if (!receivedOffer) {
-          createAndSendOffer();
+          console.log("Emit: offerToServer");
+          socket.emit("offerToServer", {
+            offer: peerConnection.localDescription,
+          });
         }
         clearTimeout(timerToSendOffer);
       }, 1000);
     }
   });
 
-  socket.on("ReceiveOffer", (data: Offer) => {
+  socket.on("offerToClient", async (data) => {
     receivedOffer = true;
-    console.log("Received: ReceiveOffer", data);
-    sendAnswerToOffer(data);
+    console.log("Got: offerToClient", data);
+
+    peerConnection = await getPeerConnection();
+
+    if (!data.offer) {
+      peerSocketId = "";
+      console.log("No offer attached by server");
+      return;
+    }
+
+    await peerConnection.setRemoteDescription(data.offer);
+    peerSocketId = data.from_socket_id;
+
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+
+    console.log("Emit: answerToServer");
+    socket.emit("answerToServer", {
+      answer,
+      to_socket_id: data.from_socket_id,
+    });
   });
 
-  socket.on("ReceiveAnswer", (data: Answer) => {
-    console.log("Received: ReceiveAnswer", data);
-    receiveAnswer(data);
+  socket.on("answerToClient", async (data) => {
+    console.log("Got: answerToClient", data);
+
+    if (!peerConnection.currentRemoteDescription) {
+      await peerConnection.setRemoteDescription(data.answer).then(() => {
+        console.log(peerConnection);
+        peerSocketId = data.from_socket_id;
+      });
+    }
   });
 
-  socket.on("candidateReceiver", (data: IceCandidateEvData) => {
-    console.log("Received: candidateReceiver");
-    peerConnection.addIceCandidate(data.ice_candidate);
+  socket.on("iceCandidateToClient", (data) => {
+    console.log("Got: iceCandidateToClient", data);
+    if (peerConnection.remoteDescription && data.ice_candidate) {
+      peerConnection.addIceCandidate(data.ice_candidate);
+    }
   });
 
   return socket;
@@ -230,7 +192,7 @@ export const initSocket = ({
 export const initMediaElements = async (
   localMedia: HTMLVideoElement,
   remoteMedia: HTMLVideoElement,
-  onDone: () => void
+  onSuccess: () => void
 ) => {
   localMediaEl = localMedia;
   remoteMediaEl = remoteMedia;
@@ -242,15 +204,15 @@ export const initMediaElements = async (
     });
 
     localMediaEl.srcObject = localStream;
+
+    onSuccess();
   } catch (err) {
     console.error(err);
   }
-
-  onDone();
 };
 
 export const cleanup = () => {
-  socket?.disconnect();
+  if (socket) socket.disconnect();
   peerConnection?.close();
   if (timerToSendOffer) clearTimeout(timerToSendOffer);
 };
