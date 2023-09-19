@@ -2,6 +2,13 @@ import express from "express";
 import sio from "socket.io";
 import cors from "cors";
 
+import { prisma } from "./prisma";
+import {
+  ServerToClientEvents,
+  ClientToServerEvents,
+  SocketData,
+} from "../shared-types";
+
 const PORT = process.env.PORT || 3000;
 
 const app = express();
@@ -39,18 +46,18 @@ let userConnections: Array<{
   offerSent?: boolean;
 }> = [];
 
-const io = new sio.Server(server, {
+const io = new sio.Server<
+  ClientToServerEvents,
+  ServerToClientEvents,
+  {},
+  SocketData
+>(server, {
   allowEIO3: true,
   cors: {
     origin: process.env.SOCKET_CONN_ORIGIN_HOST || "",
   },
 });
 
-const onSocketConnection = (connectionId: string) => {
-  userConnections.push({ connectionId });
-  console.log("Received: Connection ", connectionId);
-  console.log("USER CONNECTIONS: ", userConnections);
-};
 const onSocketDisconnect = (connectionId: string) => {
   userConnections = userConnections.filter(
     (uc) => uc.connectionId !== connectionId
@@ -58,61 +65,85 @@ const onSocketDisconnect = (connectionId: string) => {
   console.log("Received: disconnect ", connectionId);
   console.log("USER CONNECTIONS: ", userConnections);
 };
-const onUserConnected = (connectionId: string, username: string) => {
-  const idx = userConnections.findIndex(
-    (uc) => uc.connectionId === connectionId
-  );
-  userConnections[idx].username = username;
-  console.log("Received: userconnect ", username);
-  console.log("USER CONNECTIONS: ", userConnections);
-};
 
-io.on("connection", (socket) => {
-  onSocketConnection(socket.id);
+io.on("connection", async (socket) => {
+  console.log("Received: Connection ", socket.id);
 
-  socket.on("userconnect", (data) => {
-    onUserConnected(socket.id, data.username);
+  socket.on("join", async (data) => {
+    console.log("Received: join ", data);
+
+    await prisma.connection.create({
+      data: {
+        user_name: data.user_name,
+        socket_id: socket.id,
+        status: "available",
+      },
+    });
   });
 
-  socket.on("offerSentToRemote", (data) => {
-    console.log("Received: offerSentToRemote ");
-    const targetUserIdx = userConnections.findIndex(
-      (u) => u.username === data.target_user
-    );
+  socket.on("offerToServer", async (data) => {
+    console.log("Received: offerToServer ", data);
 
-    const offerReceiver = userConnections[targetUserIdx];
+    const target_connection = await prisma.connection.findFirst({
+      where: {
+        status: "available",
+        socket_id: {
+          not: socket.id,
+        },
+      },
+    });
 
-    if (offerReceiver) {
+    if (target_connection) {
       console.log("Emitting: ReceiveOffer");
-      socket.to(offerReceiver.connectionId).emit("ReceiveOffer", data);
-      userConnections;
+
+      await prisma.connection.updateMany({
+        data: {
+          status: "handshaking",
+        },
+        where: {
+          socket_id: {
+            in: [socket.id, target_connection.socket_id],
+          },
+        },
+      });
+
+      socket.to(target_connection.socket_id).emit("offerToClient", {
+        offer: data.offer,
+        from_socket_id: socket.id,
+      });
     }
   });
 
-  socket.on("answerSent", (data) => {
-    console.log("Received: answerSent");
-    const answerReceiver = userConnections.find(
-      (u) => u.username === data.target_user
-    );
+  socket.on("answerToServer", async (data) => {
+    console.log("Received: answerToServer");
 
-    if (answerReceiver) {
+    await prisma.connection.updateMany({
+      data: {
+        status: data.answer ? "engaged" : "available",
+      },
+      where: {
+        socket_id: {
+          in: [socket.id, data.to_socket_id],
+        },
+      },
+    });
+
+    if (data.answer) {
       console.log("Emitting: ReceiveAnswer");
-      socket.to(answerReceiver.connectionId).emit("ReceiveAnswer", data);
+      socket.to(data.to_socket_id).emit("answerToClient", {
+        answer: data.answer,
+        from_socket_id: socket.id,
+      });
     }
   });
 
-  socket.on("candidateSentToUser", (data) => {
-    console.log("Received: candidateSentToUser");
-    const candidateReceiver = userConnections.find(
-      (u) => u.username === data.target_user
-    );
-
-    if (candidateReceiver) {
-      console.log(
-        "Emitting: candidateReceiver",
-        candidateReceiver.connectionId
-      );
-      socket.to(candidateReceiver.connectionId).emit("candidateReceiver", data);
+  socket.on("iceCandidateToServer", (data) => {
+    if (data) {
+      console.log("Emitting: candidateReceiver", socket.id);
+      socket.to(data.to_socket_id).emit("iceCandidateToClient", {
+        ice_candidate: data.ice_candidate,
+        from_socket_id: socket.id,
+      });
     }
   });
 

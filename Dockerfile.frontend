@@ -9,11 +9,14 @@ WORKDIR /app
 # COPY  ["yarn.lock", "package.json"]
 
 # Copy source files
-COPY . .
+# !Maybe Unnecessary in case volume mount in docker-compose will provide all this.
+COPY ./frontend .
+# Copy symlinked shared file
+COPY ./shared-types.ts .
 
 # Install app dependencies
 RUN yarn install --frozen-lockfile
 
-EXPOSE 3001
+EXPOSE 3000
 
-CMD ["yarn", "dev"]
+CMD ["yarn", "dev:docker"]
